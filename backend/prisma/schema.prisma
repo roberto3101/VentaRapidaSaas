@@ -1,0 +1,504 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserRole {
+  super_admin
+  tenant_admin
+  location_manager
+  operator
+
+  @@map("user_role")
+}
+
+enum MovementType {
+  purchase
+  sale
+  transfer_in
+  transfer_out
+  adjustment_in
+  adjustment_out
+  initial
+  return_in
+  return_out
+
+  @@map("movement_type")
+}
+
+enum TransferStatus {
+  pending
+  in_transit
+  completed
+  cancelled
+
+  @@map("transfer_status")
+}
+
+enum ContactType {
+  supplier
+  customer
+  both
+
+  @@map("contact_type")
+}
+
+enum DocumentType {
+  DNI
+  RUC
+  CE
+  CI
+  RIF
+  PASSPORT
+  OTHER
+
+  @@map("document_type")
+}
+
+enum PriceType {
+  sale
+  purchase
+
+  @@map("price_type")
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  RESTORE
+  LOGIN
+  LOGOUT
+  STOCK_ADJUSTMENT
+  TRANSFER_CREATE
+  TRANSFER_COMPLETE
+  TRANSFER_CANCEL
+
+  @@map("audit_action")
+}
+
+// ============================================================================
+// MODELS
+// ============================================================================
+
+model Tenant {
+  id                          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                        String    @db.VarChar(255)
+  slug                        String    @unique @db.VarChar(100)
+  logoUrl                     String?   @map("logo_url")
+  countryCode                 String    @default("PE") @map("country_code") @db.Char(2)
+  currencyCode                String    @default("PEN") @map("currency_code") @db.Char(3)
+  currencySymbol              String    @default("S/") @map("currency_symbol") @db.VarChar(5)
+  timezone                    String    @default("America/Lima") @db.VarChar(50)
+  locale                      String?   @default("es-PE") @db.VarChar(10)
+  dateFormat                  String?   @default("DD/MM/YYYY") @map("date_format") @db.VarChar(20)
+  taxName                     String?   @default("IGV") @map("tax_name") @db.VarChar(20)
+  taxRate                     Decimal?  @default(18.00) @map("tax_rate") @db.Decimal(5, 2)
+  taxIncluded                 Boolean?  @default(true) @map("tax_included")
+  lowStockThreshold           Int?      @default(10) @map("low_stock_threshold")
+  allowNegativeStock          Boolean?  @default(false) @map("allow_negative_stock")
+  requireReferenceOnSale      Boolean?  @default(false) @map("require_reference_on_sale")
+  requireReferenceOnPurchase  Boolean?  @default(false) @map("require_reference_on_purchase")
+  plan                        String?   @default("free") @db.VarChar(50)
+  maxLocations                Int?      @default(3) @map("max_locations")
+  maxUsers                    Int?      @default(10) @map("max_users")
+  maxProducts                 Int?      @default(1000) @map("max_products")
+  isActive                    Boolean?  @default(true) @map("is_active")
+  createdAt                   DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt                   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  deletedAt                   DateTime? @map("deleted_at") @db.Timestamptz()
+
+  locations          Location[]
+  users              User[]
+  categories         Category[]
+  products           Product[]
+  contacts           Contact[]
+  transfers          Transfer[]
+  inventoryMovements InventoryMovement[]
+  auditLogs          AuditLog[]
+  tenantSequences    TenantSequence[]
+
+  @@index([slug])
+  @@index([countryCode])
+  @@map("tenants")
+}
+
+model Location {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  name          String    @db.VarChar(255)
+  code          String?   @db.VarChar(20)
+  address       String?
+  city          String?   @db.VarChar(100)
+  stateProvince String?   @map("state_province") @db.VarChar(100)
+  countryCode   String?   @map("country_code") @db.Char(2)
+  phone         String?   @db.VarChar(50)
+  email         String?   @db.VarChar(255)
+  taxName       String?   @map("tax_name") @db.VarChar(20)
+  taxRate       Decimal?  @map("tax_rate") @db.Decimal(5, 2)
+  sortOrder     Int?      @default(0) @map("sort_order")
+  isActive      Boolean?  @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz()
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userLocations      UserLocation[]
+  locationPrices     LocationPrice[]
+  inventoryMovements InventoryMovement[]
+  inventoryStock     InventoryStock[]
+  transfersFrom      Transfer[]          @relation("TransferFrom")
+  transfersTo        Transfer[]          @relation("TransferTo")
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("locations")
+}
+
+model User {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId             String?   @map("tenant_id") @db.Uuid
+  email                String    @db.VarChar(255)
+  passwordHash         String    @map("password_hash") @db.VarChar(255)
+  fullName             String    @map("full_name") @db.VarChar(255)
+  phone                String?   @db.VarChar(50)
+  role                 UserRole  @default(operator)
+  avatarUrl            String?   @map("avatar_url")
+  preferredLocationId  String?   @map("preferred_location_id") @db.Uuid
+  refreshTokenHash     String?   @map("refresh_token_hash") @db.VarChar(255)
+  lastLoginAt          DateTime? @map("last_login_at") @db.Timestamptz()
+  lastLoginIp          String?   @map("last_login_ip") @db.Inet
+  failedAttempts       Int?      @default(0) @map("failed_attempts") @db.SmallInt
+  lockedUntil          DateTime? @map("locked_until") @db.Timestamptz()
+  passwordChangedAt    DateTime? @default(now()) @map("password_changed_at") @db.Timestamptz()
+  mustChangePassword   Boolean?  @default(false) @map("must_change_password")
+  isActive             Boolean?  @default(true) @map("is_active")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  deletedAt            DateTime? @map("deleted_at") @db.Timestamptz()
+
+  tenant             Tenant?             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userLocations      UserLocation[]
+  createdProducts    Product[]           @relation("ProductCreatedBy")
+  updatedProducts    Product[]           @relation("ProductUpdatedBy")
+  updatedPrices      LocationPrice[]
+  inventoryMovements InventoryMovement[]
+  createdTransfers   Transfer[]          @relation("TransferCreatedBy")
+  completedTransfers Transfer[]          @relation("TransferCompletedBy")
+  cancelledTransfers Transfer[]          @relation("TransferCancelledBy")
+  assignedLocations  UserLocation[]      @relation("AssignedBy")
+  auditLogs          AuditLog[]
+
+  @@index([tenantId])
+  @@index([tenantId, role])
+  @@map("users")
+}
+
+model UserLocation {
+  userId     String   @map("user_id") @db.Uuid
+  locationId String   @map("location_id") @db.Uuid
+  isDefault  Boolean? @default(false) @map("is_default")
+  assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz()
+  assignedBy String?  @map("assigned_by") @db.Uuid
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  assigner   User?    @relation("AssignedBy", fields: [assignedBy], references: [id])
+
+  @@id([userId, locationId])
+  @@index([locationId])
+  @@map("user_locations")
+}
+
+model Category {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  name        String    @db.VarChar(255)
+  description String?
+  parentId    String?   @map("parent_id") @db.Uuid
+  slug        String?   @db.VarChar(255)
+  sortOrder   Int?      @default(0) @map("sort_order")
+  isActive    Boolean?  @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz()
+
+  tenant   Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent   Category?  @relation("CategoryParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[] @relation("CategoryParent")
+  products Product[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+  @@index([parentId])
+  @@map("categories")
+}
+
+model AttributeType {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  name      String   @db.VarChar(100)
+  sortOrder Int?     @default(0) @map("sort_order")
+  isActive  Boolean? @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  variantAttributeValues VariantAttributeValue[]
+
+  @@unique([tenantId, name])
+  @@map("attribute_types")
+}
+
+model Product {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  categoryId  String?   @map("category_id") @db.Uuid
+  name        String    @db.VarChar(255)
+  description String?
+  brand       String?   @db.VarChar(255)
+  imageUrl    String?   @map("image_url")
+  hasVariants Boolean?  @default(false) @map("has_variants")
+  tags        String[]
+  isActive    Boolean?  @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  createdBy   String?   @map("created_by") @db.Uuid
+  updatedBy   String?   @map("updated_by") @db.Uuid
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz()
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  creator  User?           @relation("ProductCreatedBy", fields: [createdBy], references: [id])
+  updater  User?           @relation("ProductUpdatedBy", fields: [updatedBy], references: [id])
+  variants ProductVariant[]
+
+  @@index([tenantId])
+  @@index([categoryId])
+  @@index([tenantId, isActive])
+  @@map("products")
+}
+
+model ProductVariant {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId     String    @map("product_id") @db.Uuid
+  sku           String    @db.VarChar(100)
+  barcode       String?   @db.VarChar(255)
+  variantName   String?   @map("variant_name") @db.VarChar(255)
+  purchasePrice Decimal?  @default(0) @map("purchase_price") @db.Decimal(14, 2)
+  salePrice     Decimal?  @default(0) @map("sale_price") @db.Decimal(14, 2)
+  minStock      Int?      @default(0) @map("min_stock")
+  maxStock      Int?      @map("max_stock")
+  weight        Decimal?  @db.Decimal(10, 3)
+  weightUnit    String?   @default("kg") @map("weight_unit") @db.VarChar(5)
+  unit          String?   @default("und") @db.VarChar(20)
+  unitsPerBox   Int?      @map("units_per_box")
+  isActive      Boolean?  @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz()
+
+  product                Product                 @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantAttributeValues VariantAttributeValue[]
+  locationPrices         LocationPrice[]
+  inventoryMovements     InventoryMovement[]
+  inventoryStock         InventoryStock[]
+
+  @@unique([sku, productId])
+  @@index([barcode])
+  @@index([productId])
+  @@map("product_variants")
+}
+
+model VariantAttributeValue {
+  id              String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  variantId       String @map("variant_id") @db.Uuid
+  attributeTypeId String @map("attribute_type_id") @db.Uuid
+  value           String @db.VarChar(255)
+
+  variant       ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  attributeType AttributeType  @relation(fields: [attributeTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, attributeTypeId])
+  @@index([variantId])
+  @@map("variant_attribute_values")
+}
+
+model LocationPrice {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  variantId     String    @map("variant_id") @db.Uuid
+  locationId    String    @map("location_id") @db.Uuid
+  priceType     PriceType @map("price_type")
+  price         Decimal   @db.Decimal(14, 2)
+  promoPrice    Decimal?  @map("promo_price") @db.Decimal(14, 2)
+  promoStartsAt DateTime? @map("promo_starts_at") @db.Timestamptz()
+  promoEndsAt   DateTime? @map("promo_ends_at") @db.Timestamptz()
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  updatedBy     String?   @map("updated_by") @db.Uuid
+
+  variant  ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  location Location       @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  updater  User?          @relation(fields: [updatedBy], references: [id])
+
+  @@unique([variantId, locationId, priceType])
+  @@index([variantId])
+  @@index([locationId])
+  @@map("location_prices")
+}
+
+model Contact {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String       @map("tenant_id") @db.Uuid
+  type            ContactType  @default(supplier)
+  name            String       @db.VarChar(255)
+  companyName     String?      @map("company_name") @db.VarChar(255)
+  documentType    DocumentType? @map("document_type")
+  documentNumber  String?      @map("document_number") @db.VarChar(50)
+  email           String?      @db.VarChar(255)
+  phone           String?      @db.VarChar(50)
+  address         String?
+  city            String?      @db.VarChar(100)
+  notes           String?
+  creditLimit     Decimal?     @map("credit_limit") @db.Decimal(14, 2)
+  paymentTermsDays Int?        @default(0) @map("payment_terms_days")
+  isActive        Boolean?     @default(true) @map("is_active")
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  deletedAt       DateTime?    @map("deleted_at") @db.Timestamptz()
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  inventoryMovements InventoryMovement[]
+
+  @@index([tenantId])
+  @@index([tenantId, type])
+  @@map("contacts")
+}
+
+model Transfer {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String         @map("tenant_id") @db.Uuid
+  transferNumber  String         @map("transfer_number") @db.VarChar(50)
+  fromLocationId  String         @map("from_location_id") @db.Uuid
+  toLocationId    String         @map("to_location_id") @db.Uuid
+  status          TransferStatus @default(pending)
+  notes           String?
+  expectedAt      DateTime?      @map("expected_at") @db.Timestamptz()
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy       String         @map("created_by") @db.Uuid
+  completedAt     DateTime?      @map("completed_at") @db.Timestamptz()
+  completedBy     String?        @map("completed_by") @db.Uuid
+  cancelledAt     DateTime?      @map("cancelled_at") @db.Timestamptz()
+  cancelledBy     String?        @map("cancelled_by") @db.Uuid
+  cancelReason    String?        @map("cancel_reason")
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fromLocation       Location            @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocation         Location            @relation("TransferTo", fields: [toLocationId], references: [id])
+  creator            User                @relation("TransferCreatedBy", fields: [createdBy], references: [id])
+  completer          User?               @relation("TransferCompletedBy", fields: [completedBy], references: [id])
+  canceller          User?               @relation("TransferCancelledBy", fields: [cancelledBy], references: [id])
+  inventoryMovements InventoryMovement[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@unique([tenantId, transferNumber])
+  @@map("transfers")
+}
+
+model InventoryMovement {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String       @map("tenant_id") @db.Uuid
+  locationId    String       @map("location_id") @db.Uuid
+  variantId     String       @map("variant_id") @db.Uuid
+  movementType  MovementType @map("movement_type")
+  quantity      Int
+  direction     Int          @db.SmallInt
+  transferId    String?      @map("transfer_id") @db.Uuid
+  contactId     String?      @map("contact_id") @db.Uuid
+  referenceCode String?      @map("reference_code") @db.VarChar(100)
+  unitCost      Decimal?     @map("unit_cost") @db.Decimal(14, 2)
+  unitPrice     Decimal?     @map("unit_price") @db.Decimal(14, 2)
+  taxRate       Decimal?     @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount     Decimal?     @map("tax_amount") @db.Decimal(14, 2)
+  subtotal      Decimal?     @db.Decimal(14, 2)
+  total         Decimal?     @db.Decimal(14, 2)
+  currencyCode  String?      @map("currency_code") @db.Char(3)
+  notes         String?
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy     String       @map("created_by") @db.Uuid
+  isReversal    Boolean?     @default(false) @map("is_reversal")
+  reversalOf    String?      @map("reversal_of") @db.Uuid
+
+  tenant    Tenant          @relation(fields: [tenantId], references: [id])
+  location  Location        @relation(fields: [locationId], references: [id])
+  variant   ProductVariant  @relation(fields: [variantId], references: [id])
+  transfer  Transfer?       @relation(fields: [transferId], references: [id])
+  contact   Contact?        @relation(fields: [contactId], references: [id])
+  creator   User            @relation(fields: [createdBy], references: [id])
+  original  InventoryMovement?  @relation("MovementReversal", fields: [reversalOf], references: [id])
+  reversals InventoryMovement[] @relation("MovementReversal")
+
+  @@index([variantId, locationId, direction])
+  @@index([locationId, createdAt(sort: Desc)])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("inventory_movements")
+}
+
+model InventoryStock {
+  variantId         String    @map("variant_id") @db.Uuid
+  locationId        String    @map("location_id") @db.Uuid
+  quantity          Int       @default(0)
+  reservedQuantity  Int       @default(0) @map("reserved_quantity")
+  availableQuantity Int       @default(0) @map("available_quantity")
+  lastMovementAt    DateTime? @map("last_movement_at") @db.Timestamptz()
+  lastUpdated       DateTime  @default(now()) @map("last_updated") @db.Timestamptz()
+
+  variant  ProductVariant @relation(fields: [variantId], references: [id])
+  location Location       @relation(fields: [locationId], references: [id])
+
+  @@id([variantId, locationId])
+  @@index([locationId])
+  @@map("inventory_stock")
+}
+
+model AuditLog {
+  id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String?     @map("tenant_id") @db.Uuid
+  userId     String?     @map("user_id") @db.Uuid
+  action     AuditAction
+  entityType String      @map("entity_type") @db.VarChar(50)
+  entityId   String?     @map("entity_id") @db.Uuid
+  oldValues  Json?       @map("old_values")
+  newValues  Json?       @map("new_values")
+  ipAddress  String?     @map("ip_address") @db.Inet
+  userAgent  String?     @map("user_agent")
+  metadata   Json?
+  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+  user   User?   @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
+
+model TenantSequence {
+  tenantId     String @map("tenant_id") @db.Uuid
+  sequenceType String @map("sequence_type") @db.VarChar(20)
+  prefix       String @default("TRF") @db.VarChar(10)
+  currentValue BigInt @default(0) @map("current_value")
+  year         Int    @db.SmallInt
+
+  @@id([tenantId, sequenceType, year])
+  @@map("tenant_sequences")
+}
