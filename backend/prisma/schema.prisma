@@ -499,6 +499,8 @@ model TenantSequence {
   currentValue BigInt @default(0) @map("current_value")
   year         Int    @db.SmallInt
 
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
   @@id([tenantId, sequenceType, year])
   @@map("tenant_sequences")
 }

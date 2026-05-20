@@ -39,7 +39,7 @@ async function bootstrap() {
 
   // CORS — allowlist estricta (SIS-25). NUNCA `origin: true` con `credentials: true`.
   app.enableCors({
-    origin: (origen, callback) => {
+    origin: (origen: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
       if (!origen) {
         // Sin header Origin → request same-origin o no-browser. Permitido.
         callback(null, true);
