@@ -73,21 +73,25 @@ export class ProductosService {
   }
 
   async actualizar(tenantId: string, id: string, dto: ActualizarProductoDto, actualizadoPor: string) {
-    await this.obtenerPorId(tenantId, id);
-    return this.db.product.update({
-      where: { id },
+    const result = await this.db.product.updateMany({
+      where: { id, tenantId, deletedAt: null },
       data: {
         name: dto.nombre, description: dto.descripcion, brand: dto.marca,
         categoryId: dto.categoriaId, imageUrl: dto.imagenUrl, tags: dto.etiquetas,
         updatedBy: actualizadoPor,
       },
-      include: { variants: true, category: true },
     });
+    if (result.count !== 1) throw new NotFoundException('Producto no encontrado');
+    return this.obtenerPorId(tenantId, id);
   }
 
   async eliminar(tenantId: string, id: string) {
-    await this.obtenerPorId(tenantId, id);
-    return this.db.product.update({ where: { id }, data: { deletedAt: new Date(), isActive: false } });
+    const result = await this.db.product.updateMany({
+      where: { id, tenantId, deletedAt: null },
+      data: { deletedAt: new Date(), isActive: false },
+    });
+    if (result.count !== 1) throw new NotFoundException('Producto no encontrado');
+    return { id, deleted: true };
   }
 
   async buscarPorCodigoBarras(tenantId: string, codigoBarras: string) {

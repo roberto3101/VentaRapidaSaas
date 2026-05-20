@@ -1,5 +1,24 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleInit,
+  OnModuleDestroy,
+  Logger,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaClient, Prisma } from '@prisma/client';
+import { isUUID } from 'class-validator';
+
+function assertUuid(value: string, label: string): void {
+  if (typeof value !== 'string' || !isUUID(value, '4')) {
+    throw new BadRequestException(`${label} no es un UUID v4 válido`);
+  }
+}
+
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(Math.max(Math.trunc(n), min), max);
+}
 
 @Injectable()
 export class DatabaseService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
@@ -37,11 +56,13 @@ export class DatabaseService extends PrismaClient implements OnModuleInit, OnMod
   // ─── CONTEXTO MULTI-TENANT (Activa RLS) ─────────────────────────
 
   async establecerTenantActual(tenantId: string): Promise<void> {
-    await this.$executeRawUnsafe(`SET app.current_tenant_id = '${tenantId}'`);
+    assertUuid(tenantId, 'tenantId');
+    // set_config acepta el valor como parámetro vinculado (no se interpola la cadena).
+    await this.$queryRaw`SELECT set_config('app.current_tenant_id', ${tenantId}, false)`;
   }
 
   async limpiarTenantActual(): Promise<void> {
-    await this.$executeRawUnsafe(`RESET app.current_tenant_id`);
+    await this.$queryRaw`SELECT set_config('app.current_tenant_id', '', false)`;
   }
 
   // ─── TRANSACCIONES CON TENANT ────────────────────────────────────
@@ -50,8 +71,9 @@ export class DatabaseService extends PrismaClient implements OnModuleInit, OnMod
     tenantId: string,
     operacion: (prisma: Prisma.TransactionClient) => Promise<T>,
   ): Promise<T> {
+    assertUuid(tenantId, 'tenantId');
     return this.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe(`SET app.current_tenant_id = '${tenantId}'`);
+      await tx.$queryRaw`SELECT set_config('app.current_tenant_id', ${tenantId}, false)`;
       return operacion(tx);
     });
   }
@@ -119,28 +141,40 @@ export class DatabaseService extends PrismaClient implements OnModuleInit, OnMod
     limite?: number;
     offset?: number;
   }) {
-    const condiciones: string[] = [`tenant_id = '${filtros.tenantId}'`];
+    assertUuid(filtros.tenantId, 'tenantId');
+    if (filtros.locationId) assertUuid(filtros.locationId, 'locationId');
+
+    const condiciones: Prisma.Sql[] = [
+      Prisma.sql`tenant_id = ${filtros.tenantId}::uuid`,
+    ];
 
     if (filtros.locationId) {
-      condiciones.push(`location_id = '${filtros.locationId}'`);
+      condiciones.push(Prisma.sql`location_id = ${filtros.locationId}::uuid`);
     }
     if (filtros.soloStockBajo) {
-      condiciones.push(`is_low_stock = TRUE`);
+      condiciones.push(Prisma.sql`is_low_stock = TRUE`);
     }
     if (filtros.soloAgotados) {
-      condiciones.push(`is_out_of_stock = TRUE`);
+      condiciones.push(Prisma.sql`is_out_of_stock = TRUE`);
     }
     if (filtros.busqueda) {
-      condiciones.push(`(product_name ILIKE '%${filtros.busqueda}%' OR sku ILIKE '%${filtros.busqueda}%' OR barcode = '${filtros.busqueda}')`);
+      const patron = `%${filtros.busqueda}%`;
+      condiciones.push(
+        Prisma.sql`(product_name ILIKE ${patron} OR sku ILIKE ${patron} OR barcode = ${filtros.busqueda})`,
+      );
     }
 
-    const where = condiciones.join(' AND ');
-    const limite = filtros.limite ?? 50;
-    const offset = filtros.offset ?? 0;
+    const where = Prisma.join(condiciones, ' AND ');
+    const limite = clampInt(filtros.limite, 50, 1, 500);
+    const offset = clampInt(filtros.offset, 0, 0, 1_000_000);
 
-    return this.$queryRawUnsafe(
-      `SELECT * FROM v_stock_detail WHERE ${where} ORDER BY product_name ASC LIMIT ${limite} OFFSET ${offset}`,
-    );
+    return this.$queryRaw`
+      SELECT * FROM v_stock_detail
+      WHERE ${where}
+      ORDER BY product_name ASC
+      LIMIT ${limite}
+      OFFSET ${offset}
+    `;
   }
 
   async obtenerResumenSedes(tenantId: string) {
@@ -156,22 +190,31 @@ export class DatabaseService extends PrismaClient implements OnModuleInit, OnMod
     limite?: number;
     offset?: number;
   }) {
-    const condiciones: string[] = [`tenant_id = '${filtros.tenantId}'`];
+    assertUuid(filtros.tenantId, 'tenantId');
+    if (filtros.locationId) assertUuid(filtros.locationId, 'locationId');
+
+    const condiciones: Prisma.Sql[] = [
+      Prisma.sql`tenant_id = ${filtros.tenantId}::uuid`,
+    ];
 
     if (filtros.locationId) {
-      condiciones.push(`location_id = '${filtros.locationId}'`);
+      condiciones.push(Prisma.sql`location_id = ${filtros.locationId}::uuid`);
     }
     if (filtros.tipo) {
-      condiciones.push(`movement_type = '${filtros.tipo}'`);
+      condiciones.push(Prisma.sql`movement_type = ${filtros.tipo}`);
     }
 
-    const where = condiciones.join(' AND ');
-    const limite = filtros.limite ?? 50;
-    const offset = filtros.offset ?? 0;
+    const where = Prisma.join(condiciones, ' AND ');
+    const limite = clampInt(filtros.limite, 50, 1, 500);
+    const offset = clampInt(filtros.offset, 0, 0, 1_000_000);
 
-    return this.$queryRawUnsafe(
-      `SELECT * FROM v_recent_movements WHERE ${where} ORDER BY created_at DESC LIMIT ${limite} OFFSET ${offset}`,
-    );
+    return this.$queryRaw`
+      SELECT * FROM v_recent_movements
+      WHERE ${where}
+      ORDER BY created_at DESC
+      LIMIT ${limite}
+      OFFSET ${offset}
+    `;
   }
 
   async obtenerStockTotal(tenantId: string) {

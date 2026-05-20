@@ -28,46 +28,58 @@ export class InventarioService {
       dto.cantidad, precioUnitario, Number(tasaImpuesto), tenant.taxIncluded ?? true,
     );
 
-    if (direccion === -1 && !tenant.allowNegativeStock) {
-      const stock = await this.db.inventoryStock.findUnique({
-        where: { variantId_locationId: { variantId: dto.varianteId, locationId: dto.sedeId } },
-      });
+    const requiereCheckStock = direccion === -1 && !tenant.allowNegativeStock;
 
-      const disponible = stock?.availableQuantity ?? 0;
-      if (disponible < dto.cantidad) {
-        throw new BadRequestException(
-          `Stock insuficiente. Disponible: ${disponible}, Solicitado: ${dto.cantidad}`,
-        );
+    // Race-safe path: outbound movements that cannot oversell must lock the
+    // inventory_stock row before the movement insert, so concurrent sales on
+    // the same (variantId, locationId) pair serialize on the DB.
+    // See SIS-24. Pending swap to fn_apply_movement once DBA delivers it.
+    const movimiento = await this.db.$transaction(async (tx) => {
+      if (requiereCheckStock) {
+        const filas = await tx.$queryRaw<Array<{ available_quantity: number }>>`
+          SELECT available_quantity
+          FROM inventory_stock
+          WHERE variant_id = ${dto.varianteId}::uuid
+            AND location_id = ${dto.sedeId}::uuid
+          FOR UPDATE
+        `;
+
+        const disponible = Number(filas[0]?.available_quantity ?? 0);
+        if (disponible < dto.cantidad) {
+          throw new BadRequestException(
+            `Stock insuficiente. Disponible: ${disponible}, Solicitado: ${dto.cantidad}`,
+          );
+        }
       }
-    }
 
-    const movimiento = await this.db.inventoryMovement.create({
-      data: {
-        tenantId,
-        locationId: dto.sedeId,
-        variantId: dto.varianteId,
-        movementType: dto.tipoMovimiento as any,
-        quantity: dto.cantidad,
-        direction: direccion,
-        contactId: dto.contactoId,
-        transferId: dto.transferenciaId,
-        referenceCode: dto.codigoReferencia,
-        unitCost: direccion === 1 ? precioUnitario : null,
-        unitPrice: direccion === -1 ? precioUnitario : null,
-        taxRate: calculo.tasaImpuesto,
-        taxAmount: calculo.montoImpuesto,
-        subtotal: calculo.subtotal,
-        total: calculo.total,
-        currencyCode: tenant.currencyCode,
-        notes: dto.notas,
-        createdBy: usuario.sub,
-      },
-      include: {
-        variant: { include: { product: true } },
-        location: true,
-        contact: true,
-        creator: { select: { id: true, fullName: true } },
-      },
+      return tx.inventoryMovement.create({
+        data: {
+          tenantId,
+          locationId: dto.sedeId,
+          variantId: dto.varianteId,
+          movementType: dto.tipoMovimiento as any,
+          quantity: dto.cantidad,
+          direction: direccion,
+          contactId: dto.contactoId,
+          transferId: dto.transferenciaId,
+          referenceCode: dto.codigoReferencia,
+          unitCost: direccion === 1 ? precioUnitario : null,
+          unitPrice: direccion === -1 ? precioUnitario : null,
+          taxRate: calculo.tasaImpuesto,
+          taxAmount: calculo.montoImpuesto,
+          subtotal: calculo.subtotal,
+          total: calculo.total,
+          currencyCode: tenant.currencyCode,
+          notes: dto.notas,
+          createdBy: usuario.sub,
+        },
+        include: {
+          variant: { include: { product: true } },
+          location: true,
+          contact: true,
+          creator: { select: { id: true, fullName: true } },
+        },
+      });
     });
 
     this.logger.log(
