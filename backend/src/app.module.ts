@@ -27,6 +27,7 @@ import { InventarioModule } from './modulos/inventario/inventario.module';
 import { TransferenciasModule } from './modulos/transferencias/transferencias.module';
 import { ReportesModule } from './modulos/reportes/reportes.module';
 import { HealthModule } from './modulos/health/health.module';
+import { VentasModule } from './modulos/ventas/ventas.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { HealthModule } from './modulos/health/health.module';
     TransferenciasModule,
     ReportesModule,
     HealthModule,
+    VentasModule,
   ],
   providers: [
     // Guards globales (orden importa)

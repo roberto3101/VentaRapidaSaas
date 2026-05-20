@@ -170,6 +170,69 @@ async function main() {
 
       console.log(`  ${userConfig.role.padEnd(13)} ${userConfig.email}`);
     }
+
+    // 4. Productos de prueba con stock inicial
+    const productosBase = [
+      { name: 'Coca Cola 500ml', sku: 'COCA-500', barcode: '7750000001001', purchase: 2.0, sale: 3.5, stock: 100 },
+      { name: 'Galletas Oreo', sku: 'OREO-1', barcode: '7750000001002', purchase: 1.5, sale: 2.5, stock: 50 },
+      { name: 'Pan Bimbo Grande', sku: 'BIMBO-G', barcode: '7750000001003', purchase: 4.0, sale: 6.5, stock: 30 },
+    ];
+
+    for (const p of productosBase) {
+      const existingProduct = await prisma.product.findFirst({
+        where: { tenantId: tenant.id, name: p.name },
+        include: { variants: true },
+      });
+
+      let variantId: string;
+      if (existingProduct && existingProduct.variants.length > 0) {
+        variantId = existingProduct.variants[0].id;
+      } else {
+        const product = existingProduct ?? (await prisma.product.create({
+          data: { tenantId: tenant.id, name: p.name, isActive: true, createdBy: null },
+        }));
+        const variant = await prisma.productVariant.create({
+          data: {
+            productId: product.id,
+            sku: `${p.sku}-${tenant.id.slice(0, 4)}`,
+            barcode: `${p.barcode}-${tenant.id.slice(0, 4)}`.slice(0, 50),
+            purchasePrice: p.purchase,
+            salePrice: p.sale,
+            isActive: true,
+          },
+        });
+        variantId = variant.id;
+      }
+
+      // Stock inicial vía InventoryMovement de purchase (direction=1)
+      const yaTieneStock = await prisma.inventoryStock.findUnique({
+        where: { variantId_locationId: { variantId, locationId: location.id } },
+      });
+
+      if (!yaTieneStock || (yaTieneStock.quantity ?? 0) < p.stock) {
+        // Buscar admin user para createdBy del movement
+        const adminUser = await prisma.user.findFirst({
+          where: { tenantId: tenant.id, role: 'tenant_admin' },
+        });
+        if (adminUser) {
+          await prisma.inventoryMovement.create({
+            data: {
+              tenantId: tenant.id,
+              locationId: location.id,
+              variantId,
+              movementType: 'purchase',
+              quantity: p.stock,
+              direction: 1,
+              unitCost: p.purchase,
+              currencyCode: tenant.currencyCode,
+              createdBy: adminUser.id,
+              notes: 'Stock inicial (seed-prueba)',
+            },
+          });
+        }
+      }
+    }
+    console.log(`  ${productosBase.length} productos con stock inicial`);
     console.log('');
   }
 
