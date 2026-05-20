@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useAuth } from '../../hooks/use-auth';
 import { Eye, EyeOff, Loader2, Mail, Lock } from 'lucide-react';
 import { ApiError } from '../../servicios/api';
+import { BotonesPrueba } from './botones-prueba';
 
 export function FormularioLogin() {
   const { login } = useAuth();
@@ -14,17 +15,27 @@ export function FormularioLogin() {
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const ejecutarLogin = async (credenciales: { email: string; contrasena: string }) => {
     setError('');
     setCargando(true);
     try {
-      await login({ email, contrasena });
+      await login(credenciales);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Error al iniciar sesión');
     } finally {
       setCargando(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await ejecutarLogin({ email, contrasena });
+  };
+
+  const handleSeleccionarPrueba = (creds: { email: string; contrasena: string }) => {
+    setEmail(creds.email);
+    setContrasena(creds.contrasena);
+    void ejecutarLogin(creds);
   };
 
   return (
@@ -89,6 +100,8 @@ export function FormularioLogin() {
           Registra tu negocio
         </Link>
       </p>
+
+      <BotonesPrueba onSeleccionar={handleSeleccionarPrueba} cargando={cargando} />
     </form>
   );
 }
