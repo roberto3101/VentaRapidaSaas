@@ -24,20 +24,34 @@ export class VariantesService {
     });
   }
 
-  async actualizar(id: string, dto: ActualizarVarianteDto) {
-    const variante = await this.db.productVariant.findFirst({ where: { id, deletedAt: null } });
+  async actualizar(tenantId: string, id: string, dto: ActualizarVarianteDto) {
+    const variante = await this.db.productVariant.findFirst({
+      where: { id, deletedAt: null, product: { tenantId, deletedAt: null } },
+    });
     if (!variante) throw new NotFoundException('Variante no encontrada');
     return this.db.productVariant.update({
       where: { id },
       data: {
-        sku: dto.sku, barcode: dto.codigoBarras, variantName: dto.nombreVariante,
-        purchasePrice: dto.precioCompra, salePrice: dto.precioVenta,
-        minStock: dto.stockMinimo, maxStock: dto.stockMaximo, unit: dto.unidad,
+        sku: dto.sku,
+        barcode: dto.codigoBarras,
+        variantName: dto.nombreVariante,
+        purchasePrice: dto.precioCompra,
+        salePrice: dto.precioVenta,
+        minStock: dto.stockMinimo,
+        maxStock: dto.stockMaximo,
+        unit: dto.unidad,
       },
     });
   }
 
-  async eliminar(id: string) {
-    return this.db.productVariant.update({ where: { id }, data: { deletedAt: new Date() } });
+  async eliminar(tenantId: string, id: string) {
+    const variante = await this.db.productVariant.findFirst({
+      where: { id, deletedAt: null, product: { tenantId, deletedAt: null } },
+    });
+    if (!variante) throw new NotFoundException('Variante no encontrada');
+    return this.db.productVariant.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
   }
 }

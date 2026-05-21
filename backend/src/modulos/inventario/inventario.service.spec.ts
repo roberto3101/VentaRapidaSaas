@@ -1,7 +1,8 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { InventarioService } from './inventario.service';
 import { TipoMovimiento } from '../../common/constantes/tipos-movimiento.constant';
 import type { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
+import { Rol } from '../../common/constantes/roles.constant';
 
 const TENANT_ID = '11111111-1111-1111-1111-111111111111';
 const VARIANT_ID = '22222222-2222-2222-2222-222222222222';
@@ -63,7 +64,8 @@ const usuario: JwtPayload = {
   sub: USER_ID,
   tenantId: TENANT_ID,
   email: 'test@test.com',
-  role: 'cashier',
+  rol: Rol.OPERATOR,
+  sedesIds: [LOCATION_ID],
 };
 
 describe('InventarioService.crearMovimiento', () => {
@@ -110,5 +112,95 @@ describe('InventarioService.crearMovimiento', () => {
 
     expect(db._txMock.$queryRaw).not.toHaveBeenCalled();
     expect(result).toEqual(mockMovimiento);
+  });
+});
+
+describe('InventarioService.revertirMovimiento — SIS-20 cross-tenant isolation', () => {
+  const TENANT_B = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  const MOVE_ID = 'move-orig-1';
+
+  const movimientoTenantB = {
+    id: MOVE_ID,
+    tenantId: TENANT_B,
+    locationId: LOCATION_ID,
+    variantId: VARIANT_ID,
+    movementType: 'sale',
+    quantity: 3,
+    direction: -1,
+    isReversal: false,
+    contactId: null,
+    transferId: null,
+    referenceCode: null,
+    unitCost: null,
+    unitPrice: 10,
+    taxRate: 18,
+    taxAmount: 1.62,
+    subtotal: 9,
+    total: 10.62,
+    currencyCode: 'PEN',
+  };
+
+  function buildRevertDb(overrides: {
+    findFirstResult?: unknown;
+    reversalExists?: boolean;
+  }) {
+    return {
+      inventoryMovement: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce(overrides.findFirstResult ?? null)
+          .mockResolvedValueOnce(
+            overrides.reversalExists ? { id: 'rev-1' } : null,
+          ),
+        create: jest.fn().mockResolvedValue({ id: 'reversal-new' }),
+      },
+    } as any;
+  }
+
+  it('happy path — revierte movimiento del tenant propio', async () => {
+    const db = buildRevertDb({
+      findFirstResult: { ...movimientoTenantB, tenantId: TENANT_ID },
+    });
+    const svc = new InventarioService(db);
+
+    await svc.revertirMovimiento(MOVE_ID, 'error de precio', usuario);
+
+    const createCall = db.inventoryMovement.create.mock.calls[0][0].data;
+    expect(createCall.tenantId).toBe(TENANT_ID);
+    expect(createCall.isReversal).toBe(true);
+  });
+
+  it('cross-tenant attack — lanza NotFoundException al intentar revertir movimiento de otro tenant (SIS-20)', async () => {
+    // findFirst returns null because tenantId filter excludes tenant B's record
+    const db = buildRevertDb({ findFirstResult: null });
+    const svc = new InventarioService(db);
+
+    const usuarioTenantA: JwtPayload = {
+      sub: USER_ID,
+      tenantId: TENANT_ID,
+      email: 'attacker@tenant-a.com',
+      rol: Rol.TENANT_ADMIN,
+      sedesIds: [],
+    };
+
+    await expect(
+      svc.revertirMovimiento(MOVE_ID, 'cross-tenant attempt', usuarioTenantA),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(db.inventoryMovement.create).not.toHaveBeenCalled();
+  });
+
+  it('no crea reversiuón si ya existe una para ese movimiento del tenant', async () => {
+    const db = buildRevertDb({
+      findFirstResult: { ...movimientoTenantB, tenantId: TENANT_ID },
+      reversalExists: true,
+    });
+    const svc = new InventarioService(db);
+
+    await expect(
+      svc.revertirMovimiento(MOVE_ID, 'duplicado', usuario),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(db.inventoryMovement.create).not.toHaveBeenCalled();
   });
 });

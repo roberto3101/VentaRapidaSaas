@@ -1,4 +1,12 @@
-import { Controller, Get, Post, Patch, Body, Param, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Body,
+  Param,
+  Query,
+} from '@nestjs/common';
 import { TransferenciasService } from './transferencias.service';
 import { CrearTransferenciaDto } from './dto/crear-transferencia.dto';
 import { CancelarTransferenciaDto } from './dto/cancelar-transferencia.dto';
@@ -20,30 +28,46 @@ export class TransferenciasController {
   }
 
   @Get()
-  obtenerTodas(@TenantActual() tenantId: string, @Query() paginacion: PaginacionDto) {
+  obtenerTodas(
+    @TenantActual() tenantId: string,
+    @Query() paginacion: PaginacionDto,
+  ) {
     return this.transferenciasService.obtenerTodas(tenantId, paginacion);
   }
 
   @Get(':id')
-  obtenerPorId(@Param('id', ValidarUuidPipe) id: string) {
-    return this.transferenciasService.obtenerPorId(id);
+  obtenerPorId(
+    @TenantActual() tenantId: string,
+    @Param('id', ValidarUuidPipe) id: string,
+  ) {
+    return this.transferenciasService.obtenerPorId(tenantId, id);
   }
 
   @Patch(':id/despachar')
   @Roles(Rol.LOCATION_MANAGER, Rol.TENANT_ADMIN)
-  despachar(@Param('id', ValidarUuidPipe) id: string, @UsuarioActual() usuario: any) {
+  despachar(
+    @Param('id', ValidarUuidPipe) id: string,
+    @UsuarioActual() usuario: any,
+  ) {
     return this.transferenciasService.despachar(id, usuario);
   }
 
   @Patch(':id/recibir')
   @Roles(Rol.LOCATION_MANAGER, Rol.TENANT_ADMIN)
-  recibir(@Param('id', ValidarUuidPipe) id: string, @UsuarioActual() usuario: any) {
+  recibir(
+    @Param('id', ValidarUuidPipe) id: string,
+    @UsuarioActual() usuario: any,
+  ) {
     return this.transferenciasService.recibir(id, usuario);
   }
 
   @Patch(':id/cancelar')
   @Roles(Rol.LOCATION_MANAGER, Rol.TENANT_ADMIN)
-  cancelar(@Param('id', ValidarUuidPipe) id: string, @Body() dto: CancelarTransferenciaDto, @UsuarioActual() usuario: any) {
+  cancelar(
+    @Param('id', ValidarUuidPipe) id: string,
+    @Body() dto: CancelarTransferenciaDto,
+    @UsuarioActual() usuario: any,
+  ) {
     return this.transferenciasService.cancelar(id, dto, usuario);
   }
 }

@@ -14,7 +14,7 @@ export class CategoriasService {
         tenantId,
         name: dto.nombre,
         description: dto.descripcion,
-       parentId: dto.categoriaPadreId,
+        parentId: dto.categoriaPadreId,
         slug: generarSlug(dto.nombre),
         sortOrder: dto.ordenamiento,
       },
@@ -24,7 +24,9 @@ export class CategoriasService {
   async obtenerArbol(tenantId: string) {
     const categorias = await this.db.category.findMany({
       where: { tenantId, deletedAt: null },
-      include: { children: { where: { deletedAt: null }, orderBy: { sortOrder: 'asc' } } },
+      include: {
+        children: { where: { deletedAt: null }, orderBy: { sortOrder: 'asc' } },
+      },
       orderBy: { sortOrder: 'asc' },
     });
     return categorias.filter((c) => !c.parentId);
@@ -41,16 +43,18 @@ export class CategoriasService {
   async obtenerPorId(tenantId: string, id: string) {
     const categoria = await this.db.category.findFirst({
       where: { id, tenantId, deletedAt: null },
-      include: { children: true, products: { where: { deletedAt: null }, take: 10 } },
+      include: {
+        children: true,
+        products: { where: { deletedAt: null }, take: 10 },
+      },
     });
     if (!categoria) throw new NotFoundException('Categoría no encontrada');
     return categoria;
   }
 
   async actualizar(tenantId: string, id: string, dto: ActualizarCategoriaDto) {
-    await this.obtenerPorId(tenantId, id);
-    return this.db.category.update({
-      where: { id },
+    const result = await this.db.category.updateMany({
+      where: { id, tenantId, deletedAt: null },
       data: {
         name: dto.nombre,
         description: dto.descripcion,
@@ -59,10 +63,18 @@ export class CategoriasService {
         sortOrder: dto.ordenamiento,
       },
     });
+    if (result.count !== 1)
+      throw new NotFoundException('Categoría no encontrada');
+    return this.obtenerPorId(tenantId, id);
   }
 
   async eliminar(tenantId: string, id: string) {
-    await this.obtenerPorId(tenantId, id);
-    return this.db.category.update({ where: { id }, data: { deletedAt: new Date() } });
+    const result = await this.db.category.updateMany({
+      where: { id, tenantId, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+    if (result.count !== 1)
+      throw new NotFoundException('Categoría no encontrada');
+    return { id, deleted: true };
   }
 }
