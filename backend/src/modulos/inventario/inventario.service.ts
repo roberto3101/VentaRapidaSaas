@@ -1,4 +1,9 @@
-import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  Logger,
+} from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
 import { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import { ConsultaStockDto } from './dto/consulta-stock.dto';
@@ -16,16 +21,29 @@ export class InventarioService {
     const tenantId = usuario.tenantId!;
     const direccion = obtenerDireccion(dto.tipoMovimiento);
 
-    const tenant = await this.db.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    const tenant = await this.db.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+    });
 
     const tipoPrecio = direccion === 1 ? 'purchase' : 'sale';
-    const precioUnitario = dto.precioUnitario
-      ?? await this.db.obtenerPrecioEfectivo(dto.varianteId, dto.sedeId, tipoPrecio as any);
+    const precioUnitario =
+      dto.precioUnitario ??
+      (await this.db.obtenerPrecioEfectivo(
+        dto.varianteId,
+        dto.sedeId,
+        tipoPrecio,
+      ));
 
-    const tasaImpuesto = await this.db.obtenerTasaImpuestoEfectiva(tenantId, dto.sedeId);
+    const tasaImpuesto = await this.db.obtenerTasaImpuestoEfectiva(
+      tenantId,
+      dto.sedeId,
+    );
 
     const calculo = calcularImpuestos(
-      dto.cantidad, precioUnitario, Number(tasaImpuesto), tenant.taxIncluded ?? true,
+      dto.cantidad,
+      precioUnitario,
+      Number(tasaImpuesto),
+      tenant.taxIncluded ?? true,
     );
 
     const requiereCheckStock = direccion === -1 && !tenant.allowNegativeStock;
@@ -89,22 +107,32 @@ export class InventarioService {
     return movimiento;
   }
 
-  async revertirMovimiento(movimientoId: string, razon: string, usuario: JwtPayload) {
-    const original = await this.db.inventoryMovement.findUnique({
-      where: { id: movimientoId },
+  async revertirMovimiento(
+    movimientoId: string,
+    razon: string,
+    usuario: JwtPayload,
+  ) {
+    const tenantId = usuario.tenantId!;
+    // findFirst with tenantId prevents cross-tenant read → the subsequent
+    // create uses caller's tenantId, not original.tenantId, eliminating the
+    // confirmed cross-tenant write from SIS-20.
+    const original = await this.db.inventoryMovement.findFirst({
+      where: { id: movimientoId, tenantId },
     });
 
     if (!original) throw new NotFoundException('Movimiento no encontrado');
-    if (original.isReversal) throw new BadRequestException('No se puede revertir una reversión');
+    if (original.isReversal)
+      throw new BadRequestException('No se puede revertir una reversión');
 
     const yaTieneReversion = await this.db.inventoryMovement.findFirst({
-      where: { reversalOf: movimientoId },
+      where: { reversalOf: movimientoId, tenantId },
     });
-    if (yaTieneReversion) throw new BadRequestException('Este movimiento ya fue revertido');
+    if (yaTieneReversion)
+      throw new BadRequestException('Este movimiento ya fue revertido');
 
     return this.db.inventoryMovement.create({
       data: {
-        tenantId: original.tenantId,
+        tenantId,
         locationId: original.locationId,
         variantId: original.variantId,
         movementType: original.movementType,
@@ -141,7 +169,15 @@ export class InventarioService {
     });
   }
 
-  async obtenerMovimientos(tenantId: string, filtros: { sedeId?: string; tipo?: string; limite?: number; offset?: number }) {
+  async obtenerMovimientos(
+    tenantId: string,
+    filtros: {
+      sedeId?: string;
+      tipo?: string;
+      limite?: number;
+      offset?: number;
+    },
+  ) {
     return this.db.obtenerMovimientosRecientes({
       tenantId,
       locationId: filtros.sedeId,
@@ -153,8 +189,18 @@ export class InventarioService {
 
   async obtenerStockPorVarianteYSede(varianteId: string, sedeId: string) {
     const stock = await this.db.inventoryStock.findUnique({
-      where: { variantId_locationId: { variantId: varianteId, locationId: sedeId } },
+      where: {
+        variantId_locationId: { variantId: varianteId, locationId: sedeId },
+      },
     });
-    return stock ?? { variantId: varianteId, locationId: sedeId, quantity: 0, reservedQuantity: 0, availableQuantity: 0 };
+    return (
+      stock ?? {
+        variantId: varianteId,
+        locationId: sedeId,
+        quantity: 0,
+        reservedQuantity: 0,
+        availableQuantity: 0,
+      }
+    );
   }
 }
