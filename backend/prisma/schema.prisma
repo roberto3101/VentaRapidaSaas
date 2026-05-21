@@ -92,6 +92,25 @@ enum PaymentMethod {
   @@map("payment_method")
 }
 
+enum ReceiptType {
+  ticket   // interno no fiscal (bodega informal)
+  boleta   // boleta de venta (PE) / factura simple (VE)
+  factura  // factura electronica (PE) / factura con IGTF (VE)
+  nota_credito
+  nota_debito
+
+  @@map("receipt_type")
+}
+
+enum ReceiptStatus {
+  draft
+  issued
+  voided
+  rejected   // SUNAT/SENIAT rechazo (futuro)
+
+  @@map("receipt_status")
+}
+
 enum AuditAction {
   CREATE
   UPDATE
@@ -150,6 +169,7 @@ model Tenant {
   sales              Sale[]
   saleItems          SaleItem[]
   payments           Payment[]
+  receipts           Receipt[]
 
   @@index([slug])
   @@index([countryCode])
@@ -183,6 +203,7 @@ model Location {
   transfersFrom      Transfer[]          @relation("TransferFrom")
   transfersTo        Transfer[]          @relation("TransferTo")
   sales              Sale[]
+  receipts           Receipt[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -559,6 +580,7 @@ model Sale {
   customer Contact?   @relation(fields: [customerId], references: [id])
   items    SaleItem[]
   payments Payment[]
+  receipts Receipt[]
 
   @@unique([tenantId, locationId, saleNumber])
   @@index([tenantId, locationId, createdAt(sort: Desc)])
@@ -607,4 +629,39 @@ model Payment {
 
   @@index([saleId])
   @@map("payments")
+}
+
+model Receipt {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String        @map("tenant_id") @db.Uuid
+  locationId     String        @map("location_id") @db.Uuid
+  saleId         String?       @map("sale_id") @db.Uuid
+  type           ReceiptType
+  series         String        @db.VarChar(10)
+  number         Int
+  status         ReceiptStatus @default(draft)
+  customerDocType   String?    @map("customer_doc_type") @db.VarChar(20)
+  customerDocNumber String?    @map("customer_doc_number") @db.VarChar(30)
+  customerName      String?    @map("customer_name") @db.VarChar(255)
+  customerAddress   String?    @map("customer_address")
+  subtotal       Decimal       @db.Decimal(15, 4)
+  taxAmount      Decimal       @map("tax_amount") @db.Decimal(15, 4)
+  total          Decimal       @db.Decimal(15, 4)
+  currencyCode   String        @map("currency_code") @db.Char(3)
+  payloadJson    Json?         @map("payload_json")
+  fileUrl        String?       @map("file_url")
+  issuedAt       DateTime?     @map("issued_at") @db.Timestamptz()
+  voidedAt       DateTime?     @map("voided_at") @db.Timestamptz()
+  voidReason     String?       @map("void_reason")
+  externalCode   String?       @map("external_code") @db.VarChar(255)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id])
+  sale     Sale?    @relation(fields: [saleId], references: [id])
+
+  @@unique([tenantId, locationId, type, series, number])
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@index([saleId])
+  @@map("receipts")
 }
