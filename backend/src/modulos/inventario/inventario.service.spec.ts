@@ -2,21 +2,24 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { InventarioService } from './inventario.service';
 import { TipoMovimiento } from '../../common/constantes/tipos-movimiento.constant';
 import type { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
-import { Rol } from '../../common/constantes/roles.constant';
+import type { Rol } from '../../common/constantes/roles.constant';
 
 const TENANT_ID = '11111111-1111-1111-1111-111111111111';
+const OTHER_TENANT_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const VARIANT_ID = '22222222-2222-2222-2222-222222222222';
 const LOCATION_ID = '33333333-3333-3333-3333-333333333333';
 const USER_ID = '44444444-4444-4444-4444-444444444444';
+const MOVE_ID = 'move-1';
 
 const mockMovimiento = {
-  id: 'move-1',
+  id: MOVE_ID,
   tenantId: TENANT_ID,
   variantId: VARIANT_ID,
   locationId: LOCATION_ID,
   quantity: 1,
   direction: -1,
   movementType: 'sale',
+  isReversal: false,
   variant: { product: { name: 'Producto Test' } },
   location: { name: 'Sede Principal' },
   contact: null,
@@ -53,6 +56,32 @@ function buildMockDb(availableQty: number) {
   } as any;
 }
 
+function buildRevertirDb(overrides: {
+  original?: Record<string, unknown> | null;
+  yaTieneReversion?: Record<string, unknown> | null;
+}) {
+  const findFirstCalls: Array<Record<string, unknown>> = [];
+  return {
+    inventoryMovement: {
+      findFirst: jest.fn().mockImplementation((args: { where: Record<string, unknown> }) => {
+        findFirstCalls.push(args.where);
+        // First call: lookup by id → return original movement (or null)
+        if (args.where['id'] !== undefined) {
+          return Promise.resolve(
+            overrides.original !== undefined
+              ? overrides.original
+              : { ...mockMovimiento, tenantId: TENANT_ID },
+          );
+        }
+        // Second call: duplicate-reversal check
+        return Promise.resolve(overrides.yaTieneReversion ?? null);
+      }),
+      create: jest.fn().mockResolvedValue({ ...mockMovimiento, isReversal: true }),
+    },
+    _findFirstCalls: findFirstCalls,
+  } as any;
+}
+
 const baseDto = {
   varianteId: VARIANT_ID,
   sedeId: LOCATION_ID,
@@ -64,7 +93,7 @@ const usuario: JwtPayload = {
   sub: USER_ID,
   tenantId: TENANT_ID,
   email: 'test@test.com',
-  rol: Rol.OPERATOR,
+  rol: 'operator' as Rol,
   sedesIds: [LOCATION_ID],
 };
 
@@ -80,13 +109,12 @@ describe('InventarioService.crearMovimiento', () => {
   });
 
   it('oversell guard — lanza BadRequestException cuando stock < cantidad solicitada (SIS-24)', async () => {
-    const db = buildMockDb(0); // 0 units available
+    const db = buildMockDb(0);
     const svc = new InventarioService(db);
 
     await expect(svc.crearMovimiento(baseDto, usuario)).rejects.toBeInstanceOf(
       BadRequestException,
     );
-    // movement must NOT have been inserted
     expect(db._txMock.inventoryMovement.create).not.toHaveBeenCalled();
   });
 
@@ -96,13 +124,12 @@ describe('InventarioService.crearMovimiento', () => {
 
     await svc.crearMovimiento(baseDto, usuario);
 
-    // The $queryRaw call (SELECT ... FOR UPDATE) must happen inside the $transaction callback
     expect(db.$transaction).toHaveBeenCalledTimes(1);
     expect(db._txMock.$queryRaw).toHaveBeenCalledTimes(1);
   });
 
   it('movimientos de entrada no disparan el SELECT FOR UPDATE', async () => {
-    const db = buildMockDb(0); // stock=0 but must NOT block inbound
+    const db = buildMockDb(0);
     const svc = new InventarioService(db);
 
     const result = await svc.crearMovimiento(
@@ -115,92 +142,58 @@ describe('InventarioService.crearMovimiento', () => {
   });
 });
 
-describe('InventarioService.revertirMovimiento — SIS-20 cross-tenant isolation', () => {
-  const TENANT_B = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
-  const MOVE_ID = 'move-orig-1';
-
-  const movimientoTenantB = {
-    id: MOVE_ID,
-    tenantId: TENANT_B,
-    locationId: LOCATION_ID,
-    variantId: VARIANT_ID,
-    movementType: 'sale',
-    quantity: 3,
-    direction: -1,
-    isReversal: false,
-    contactId: null,
-    transferId: null,
-    referenceCode: null,
-    unitCost: null,
-    unitPrice: 10,
-    taxRate: 18,
-    taxAmount: 1.62,
-    subtotal: 9,
-    total: 10.62,
-    currencyCode: 'PEN',
-  };
-
-  function buildRevertDb(overrides: {
-    findFirstResult?: unknown;
-    reversalExists?: boolean;
-  }) {
-    return {
-      inventoryMovement: {
-        findFirst: jest
-          .fn()
-          .mockResolvedValueOnce(overrides.findFirstResult ?? null)
-          .mockResolvedValueOnce(
-            overrides.reversalExists ? { id: 'rev-1' } : null,
-          ),
-        create: jest.fn().mockResolvedValue({ id: 'reversal-new' }),
-      },
-    } as any;
-  }
-
-  it('happy path — revierte movimiento del tenant propio', async () => {
-    const db = buildRevertDb({
-      findFirstResult: { ...movimientoTenantB, tenantId: TENANT_ID },
-    });
+describe('InventarioService.revertirMovimiento (SIS-20)', () => {
+  it('happy path — revierte el movimiento del mismo tenant', async () => {
+    const db = buildRevertirDb({});
     const svc = new InventarioService(db);
 
-    await svc.revertirMovimiento(MOVE_ID, 'error de precio', usuario);
+    const result = await svc.revertirMovimiento(MOVE_ID, 'error de caja', usuario);
 
-    const createCall = db.inventoryMovement.create.mock.calls[0][0].data;
-    expect(createCall.tenantId).toBe(TENANT_ID);
-    expect(createCall.isReversal).toBe(true);
+    expect(db.inventoryMovement.create).toHaveBeenCalledTimes(1);
+    const created = (db.inventoryMovement.create.mock.calls[0] as Array<{ data: { tenantId: string } }>)[0].data;
+    expect(created.tenantId).toBe(TENANT_ID);
+    expect(result.isReversal).toBe(true);
   });
 
-  it('cross-tenant attack — lanza NotFoundException al intentar revertir movimiento de otro tenant (SIS-20)', async () => {
-    // findFirst returns null because tenantId filter excludes tenant B's record
-    const db = buildRevertDb({ findFirstResult: null });
+  it('rechaza cross-tenant — no filtra movimiento de otro tenant (SIS-20)', async () => {
+    const db = buildRevertirDb({ original: null });
     const svc = new InventarioService(db);
 
-    const usuarioTenantA: JwtPayload = {
-      sub: USER_ID,
-      tenantId: TENANT_ID,
-      email: 'attacker@tenant-a.com',
-      rol: Rol.TENANT_ADMIN,
-      sedesIds: [],
-    };
+    const otherUser: JwtPayload = { ...usuario, tenantId: OTHER_TENANT_ID };
 
     await expect(
-      svc.revertirMovimiento(MOVE_ID, 'cross-tenant attempt', usuarioTenantA),
+      svc.revertirMovimiento(MOVE_ID, 'test', otherUser),
     ).rejects.toBeInstanceOf(NotFoundException);
 
     expect(db.inventoryMovement.create).not.toHaveBeenCalled();
   });
 
-  it('no crea reversiuón si ya existe una para ese movimiento del tenant', async () => {
-    const db = buildRevertDb({
-      findFirstResult: { ...movimientoTenantB, tenantId: TENANT_ID },
-      reversalExists: true,
-    });
+  it('el findFirst incluye tenantId del caller en el where (SIS-20)', async () => {
+    const db = buildRevertirDb({});
+    const svc = new InventarioService(db);
+
+    await svc.revertirMovimiento(MOVE_ID, 'test', usuario);
+
+    const firstCall = db._findFirstCalls[0] as { id?: string; tenantId?: string };
+    expect(firstCall.id).toBe(MOVE_ID);
+    expect(firstCall.tenantId).toBe(TENANT_ID);
+  });
+
+  it('lanza BadRequestException si el movimiento es una reversión', async () => {
+    const db = buildRevertirDb({ original: { ...mockMovimiento, isReversal: true } });
     const svc = new InventarioService(db);
 
     await expect(
-      svc.revertirMovimiento(MOVE_ID, 'duplicado', usuario),
+      svc.revertirMovimiento(MOVE_ID, 'test', usuario),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
 
-    expect(db.inventoryMovement.create).not.toHaveBeenCalled();
+  it('lanza BadRequestException si el movimiento ya fue revertido', async () => {
+    const db = buildRevertirDb({ yaTieneReversion: { id: 'rev-existing' } });
+    const svc = new InventarioService(db);
+
+    await expect(
+      svc.revertirMovimiento(MOVE_ID, 'test', usuario),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
