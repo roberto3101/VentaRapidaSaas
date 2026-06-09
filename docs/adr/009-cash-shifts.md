@@ -52,7 +52,7 @@ Hoy `Sale` referencia `cashierId` y `locationId` ([[005-sale-concurrency]]) pero
 - ✅ Auto-cierre evita turnos huérfanos eternos sin perder trazabilidad (`actualAmount=NULL` señala "no contado").
 - ⚠️ Cajero que olvida cerrar bloquea su próxima jornada hasta aprobación del manager (mitigación: notificación push).
 - ⚠️ `cashShiftId` en `Sale` exige migración aditiva con backfill (turno sintético "legacy" por sede).
-- 🔓 Riesgo abierto — **multi-moneda en una sede** (Venezuela bimonetario USD+VES): arqueo debe partirse por `currencyCode`. Pendiente ADR-010.
+- 🔓 Riesgo abierto — **multi-moneda en una sede** (Venezuela bimonetario USD+VES): arqueo debe partirse por `currencyCode`. Pendiente **ADR-022** (bimonetario VE). El ADR-010 actual es "Frontend architecture", no confundir.
 
 ## Alternatives considered
 

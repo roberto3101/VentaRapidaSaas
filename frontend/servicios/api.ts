@@ -23,7 +23,19 @@ class ApiClient {
       const error = data as ErrorApi;
       throw new ApiError(error.mensaje || 'Error desconocido', res.status, error.errores);
     }
-    return (data as RespuestaApi<T>).datos ?? data;
+    // El backend envuelve toda respuesta con TransformarInterceptor:
+    //   { exitoso: true, datos: <T | null>, timestamp, meta? }
+    // No podemos usar `?? data` porque cuando `datos` es `null` legítimamente
+    // (ej. /cajas/activo sin turno) el `??` devolvía el wrapper completo en vez de null.
+    if (
+      data !== null &&
+      typeof data === 'object' &&
+      'exitoso' in data &&
+      'datos' in data
+    ) {
+      return (data as RespuestaApi<T>).datos;
+    }
+    return data as T;
   }
 
   async get<T>(path: string, auth = true): Promise<T> {

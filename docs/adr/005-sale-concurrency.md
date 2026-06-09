@@ -12,7 +12,7 @@ Caso de uso crítico: dos cajeros en la misma sucursal venden el último product
 Hoy:
 
 - `InventarioService.crearMovimiento` (`inventario.service.ts:31`) verifica disponibilidad con un `findUnique` de `InventoryStock` y luego crea `InventoryMovement` **sin lock ni transacción atómica**. Race condition trivial: ambos cajeros leen `availableQuantity = 1`, ambos crean movimientos, stock final = -1 (y `allowNegativeStock` típicamente es `false`, lo cual genera estado inconsistente, no falla).
-- La tabla `InventoryStock` es un cache materializado del agregado de `InventoryMovement`. No hay trigger PostgreSQL visible en el schema Prisma (puede existir en DB, no en código fuente — gap entre schema.prisma y BD real, ver [[008-prisma-schema-vs-db]] pendiente).
+- La tabla `InventoryStock` es un cache materializado del agregado de `InventoryMovement`. No hay trigger PostgreSQL visible en el schema Prisma (puede existir en DB, no en código fuente — gap entre `schema.prisma` y BD real, pendiente issue de schema audit; se aborda con el linter de migrations descrito en [[013-deploy-environments-cicd]] §6).
 - No hay módulo `Sales` aún. Cuando se cree, hereda esta clase de bug si no se decide ahora.
 
 ## Decision
