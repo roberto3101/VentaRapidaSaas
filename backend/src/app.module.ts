@@ -28,6 +28,9 @@ import { TransferenciasModule } from './modulos/transferencias/transferencias.mo
 import { ReportesModule } from './modulos/reportes/reportes.module';
 import { HealthModule } from './modulos/health/health.module';
 import { VentasModule } from './modulos/ventas/ventas.module';
+import { ComprobantesModule } from './modulos/comprobantes/comprobantes.module';
+import { CajasModule } from './modulos/cajas/cajas.module';
+import { PagosModule } from './modulos/pagos/pagos.module';
 
 @Module({
   imports: [
@@ -55,6 +58,9 @@ import { VentasModule } from './modulos/ventas/ventas.module';
     ReportesModule,
     HealthModule,
     VentasModule,
+    ComprobantesModule,
+    CajasModule,
+    PagosModule,
   ],
   providers: [
     // Guards globales (orden importa)

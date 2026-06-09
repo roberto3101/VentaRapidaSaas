@@ -4,8 +4,8 @@ generator client {
 }
 
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // ============================================================================
@@ -87,9 +87,78 @@ enum PaymentMethod {
   plin
   bank_transfer
   credit
+  store_credit
   other
 
   @@map("payment_method")
+}
+
+enum PaymentStatus {
+  initiated // Creado, sin captura aún (esperando OTP/3DS/etc.)
+  awaiting_confirmation // Strategy externa devolvió pending — esperando webhook
+  authorized // Pre-autorizado (tarjeta) sin captura final
+  captured // Cobro efectivo finalizado
+  failed // Strategy rechazó o expiró
+  voided // Anulado antes de captura
+  refunded // Reembolsado total (parcial sigue captured con refundedAmount)
+
+  @@map("payment_status")
+}
+
+enum StoreCreditStatus {
+  active
+  used
+  expired
+  voided
+
+  @@map("store_credit_status")
+}
+
+enum ReceiptType {
+  ticket // interno no fiscal (bodega informal)
+  boleta // boleta de venta (PE) / factura simple (VE)
+  factura // factura electronica (PE) / factura con IGTF (VE)
+  nota_credito
+  nota_debito
+
+  @@map("receipt_type")
+}
+
+enum ReceiptStatus {
+  draft
+  issued
+  voided
+  rejected // SUNAT/SENIAT rechazo (futuro)
+
+  @@map("receipt_status")
+}
+
+enum CashShiftStatus {
+  open
+  auto_closed
+  pending_approval
+  reconciled
+
+  @@map("cash_shift_status")
+}
+
+enum CashMovementType {
+  in
+  out
+
+  @@map("cash_movement_type")
+}
+
+enum CashMovementReason {
+  initial // Apertura del turno con monto base
+  sale // Pago en efectivo de una venta
+  refund // Reembolso en efectivo por devolución
+  cash_in // Inyección manual (ej. cambio)
+  cash_out // Retiro manual (ej. a banco)
+  adjustment // Ajuste autorizado de diferencia
+  closing // Marker de cierre — opcional
+
+  @@map("cash_movement_reason")
 }
 
 enum AuditAction {
@@ -112,31 +181,31 @@ enum AuditAction {
 // ============================================================================
 
 model Tenant {
-  id                          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                        String    @db.VarChar(255)
-  slug                        String    @unique @db.VarChar(100)
-  logoUrl                     String?   @map("logo_url")
-  countryCode                 String    @default("PE") @map("country_code") @db.Char(2)
-  currencyCode                String    @default("PEN") @map("currency_code") @db.Char(3)
-  currencySymbol              String    @default("S/") @map("currency_symbol") @db.VarChar(5)
-  timezone                    String    @default("America/Lima") @db.VarChar(50)
-  locale                      String?   @default("es-PE") @db.VarChar(10)
-  dateFormat                  String?   @default("DD/MM/YYYY") @map("date_format") @db.VarChar(20)
-  taxName                     String?   @default("IGV") @map("tax_name") @db.VarChar(20)
-  taxRate                     Decimal?  @default(18.00) @map("tax_rate") @db.Decimal(5, 2)
-  taxIncluded                 Boolean?  @default(true) @map("tax_included")
-  lowStockThreshold           Int?      @default(10) @map("low_stock_threshold")
-  allowNegativeStock          Boolean?  @default(false) @map("allow_negative_stock")
-  requireReferenceOnSale      Boolean?  @default(false) @map("require_reference_on_sale")
-  requireReferenceOnPurchase  Boolean?  @default(false) @map("require_reference_on_purchase")
-  plan                        String?   @default("free") @db.VarChar(50)
-  maxLocations                Int?      @default(3) @map("max_locations")
-  maxUsers                    Int?      @default(10) @map("max_users")
-  maxProducts                 Int?      @default(1000) @map("max_products")
-  isActive                    Boolean?  @default(true) @map("is_active")
-  createdAt                   DateTime  @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt                   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
-  deletedAt                   DateTime? @map("deleted_at") @db.Timestamptz()
+  id                         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                       String    @db.VarChar(255)
+  slug                       String    @unique @db.VarChar(100)
+  logoUrl                    String?   @map("logo_url")
+  countryCode                String    @default("PE") @map("country_code") @db.Char(2)
+  currencyCode               String    @default("PEN") @map("currency_code") @db.Char(3)
+  currencySymbol             String    @default("S/") @map("currency_symbol") @db.VarChar(5)
+  timezone                   String    @default("America/Lima") @db.VarChar(50)
+  locale                     String?   @default("es-PE") @db.VarChar(10)
+  dateFormat                 String?   @default("DD/MM/YYYY") @map("date_format") @db.VarChar(20)
+  taxName                    String?   @default("IGV") @map("tax_name") @db.VarChar(20)
+  taxRate                    Decimal?  @default(18.00) @map("tax_rate") @db.Decimal(5, 2)
+  taxIncluded                Boolean?  @default(true) @map("tax_included")
+  lowStockThreshold          Int?      @default(10) @map("low_stock_threshold")
+  allowNegativeStock         Boolean?  @default(false) @map("allow_negative_stock")
+  requireReferenceOnSale     Boolean?  @default(false) @map("require_reference_on_sale")
+  requireReferenceOnPurchase Boolean?  @default(false) @map("require_reference_on_purchase")
+  plan                       String?   @default("free") @db.VarChar(50)
+  maxLocations               Int?      @default(3) @map("max_locations")
+  maxUsers                   Int?      @default(10) @map("max_users")
+  maxProducts                Int?      @default(1000) @map("max_products")
+  isActive                   Boolean?  @default(true) @map("is_active")
+  createdAt                  DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt                  DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  deletedAt                  DateTime? @map("deleted_at") @db.Timestamptz()
 
   locations          Location[]
   users              User[]
@@ -150,6 +219,9 @@ model Tenant {
   sales              Sale[]
   saleItems          SaleItem[]
   payments           Payment[]
+  receipts           Receipt[]
+  cashShifts         CashShift[]
+  storeCredits       StoreCredit[]
 
   @@index([slug])
   @@index([countryCode])
@@ -183,6 +255,8 @@ model Location {
   transfersFrom      Transfer[]          @relation("TransferFrom")
   transfersTo        Transfer[]          @relation("TransferTo")
   sales              Sale[]
+  receipts           Receipt[]
+  cashShifts         CashShift[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -190,39 +264,43 @@ model Location {
 }
 
 model User {
-  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId             String?   @map("tenant_id") @db.Uuid
-  email                String    @unique @db.VarChar(255)
-  passwordHash         String    @map("password_hash") @db.VarChar(255)
-  fullName             String    @map("full_name") @db.VarChar(255)
-  phone                String?   @db.VarChar(50)
-  role                 UserRole  @default(operator)
-  avatarUrl            String?   @map("avatar_url")
-  preferredLocationId  String?   @map("preferred_location_id") @db.Uuid
-  refreshTokenHash     String?   @map("refresh_token_hash") @db.VarChar(255)
-  lastLoginAt          DateTime? @map("last_login_at") @db.Timestamptz()
-  lastLoginIp          String?   @map("last_login_ip") @db.Inet
-  failedAttempts       Int?      @default(0) @map("failed_attempts") @db.SmallInt
-  lockedUntil          DateTime? @map("locked_until") @db.Timestamptz()
-  passwordChangedAt    DateTime? @default(now()) @map("password_changed_at") @db.Timestamptz()
-  mustChangePassword   Boolean?  @default(false) @map("must_change_password")
-  isActive             Boolean?  @default(true) @map("is_active")
-  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
-  deletedAt            DateTime? @map("deleted_at") @db.Timestamptz()
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId            String?   @map("tenant_id") @db.Uuid
+  email               String    @unique @db.VarChar(255)
+  passwordHash        String    @map("password_hash") @db.VarChar(255)
+  fullName            String    @map("full_name") @db.VarChar(255)
+  phone               String?   @db.VarChar(50)
+  role                UserRole  @default(operator)
+  avatarUrl           String?   @map("avatar_url")
+  preferredLocationId String?   @map("preferred_location_id") @db.Uuid
+  refreshTokenHash    String?   @map("refresh_token_hash") @db.VarChar(255)
+  lastLoginAt         DateTime? @map("last_login_at") @db.Timestamptz()
+  lastLoginIp         String?   @map("last_login_ip") @db.Inet
+  failedAttempts      Int?      @default(0) @map("failed_attempts") @db.SmallInt
+  lockedUntil         DateTime? @map("locked_until") @db.Timestamptz()
+  passwordChangedAt   DateTime? @default(now()) @map("password_changed_at") @db.Timestamptz()
+  mustChangePassword  Boolean?  @default(false) @map("must_change_password")
+  isActive            Boolean?  @default(true) @map("is_active")
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  deletedAt           DateTime? @map("deleted_at") @db.Timestamptz()
 
-  tenant             Tenant?             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  userLocations      UserLocation[]
-  createdProducts    Product[]           @relation("ProductCreatedBy")
-  updatedProducts    Product[]           @relation("ProductUpdatedBy")
-  updatedPrices      LocationPrice[]
-  inventoryMovements InventoryMovement[]
-  createdTransfers   Transfer[]          @relation("TransferCreatedBy")
-  completedTransfers Transfer[]          @relation("TransferCompletedBy")
-  cancelledTransfers Transfer[]          @relation("TransferCancelledBy")
-  assignedLocations  UserLocation[]      @relation("AssignedBy")
-  auditLogs          AuditLog[]
-  cashierSales       Sale[]              @relation("CashierSales")
+  tenant                  Tenant?             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userLocations           UserLocation[]
+  createdProducts         Product[]           @relation("ProductCreatedBy")
+  updatedProducts         Product[]           @relation("ProductUpdatedBy")
+  updatedPrices           LocationPrice[]
+  inventoryMovements      InventoryMovement[]
+  createdTransfers        Transfer[]          @relation("TransferCreatedBy")
+  completedTransfers      Transfer[]          @relation("TransferCompletedBy")
+  cancelledTransfers      Transfer[]          @relation("TransferCancelledBy")
+  assignedLocations       UserLocation[]      @relation("AssignedBy")
+  auditLogs               AuditLog[]
+  cashierSales            Sale[]              @relation("CashierSales")
+  cashShifts              CashShift[]         @relation("CashShiftUser")
+  closedShifts            CashShift[]         @relation("CashShiftClosedBy")
+  approvedShifts          CashShift[]         @relation("CashShiftApprovedBy")
+  authorizedCashMovements CashMovement[]      @relation("CashMovementAuthorizedBy")
 
   @@index([tenantId])
   @@index([tenantId, role])
@@ -236,9 +314,9 @@ model UserLocation {
   assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz()
   assignedBy String?  @map("assigned_by") @db.Uuid
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  assigner   User?    @relation("AssignedBy", fields: [assignedBy], references: [id])
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  assigner User?    @relation("AssignedBy", fields: [assignedBy], references: [id])
 
   @@id([userId, locationId])
   @@index([locationId])
@@ -300,10 +378,10 @@ model Product {
   updatedBy   String?   @map("updated_by") @db.Uuid
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz()
 
-  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  category Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  creator  User?           @relation("ProductCreatedBy", fields: [createdBy], references: [id])
-  updater  User?           @relation("ProductUpdatedBy", fields: [updatedBy], references: [id])
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  creator  User?            @relation("ProductCreatedBy", fields: [createdBy], references: [id])
+  updater  User?            @relation("ProductUpdatedBy", fields: [updatedBy], references: [id])
   variants ProductVariant[]
 
   @@index([tenantId])
@@ -382,24 +460,24 @@ model LocationPrice {
 }
 
 model Contact {
-  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId        String       @map("tenant_id") @db.Uuid
-  type            ContactType  @default(supplier)
-  name            String       @db.VarChar(255)
-  companyName     String?      @map("company_name") @db.VarChar(255)
-  documentType    DocumentType? @map("document_type")
-  documentNumber  String?      @map("document_number") @db.VarChar(50)
-  email           String?      @db.VarChar(255)
-  phone           String?      @db.VarChar(50)
-  address         String?
-  city            String?      @db.VarChar(100)
-  notes           String?
-  creditLimit     Decimal?     @map("credit_limit") @db.Decimal(14, 2)
-  paymentTermsDays Int?        @default(0) @map("payment_terms_days")
-  isActive        Boolean?     @default(true) @map("is_active")
-  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
-  deletedAt       DateTime?    @map("deleted_at") @db.Timestamptz()
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String        @map("tenant_id") @db.Uuid
+  type             ContactType   @default(supplier)
+  name             String        @db.VarChar(255)
+  companyName      String?       @map("company_name") @db.VarChar(255)
+  documentType     DocumentType? @map("document_type")
+  documentNumber   String?       @map("document_number") @db.VarChar(50)
+  email            String?       @db.VarChar(255)
+  phone            String?       @db.VarChar(50)
+  address          String?
+  city             String?       @db.VarChar(100)
+  notes            String?
+  creditLimit      Decimal?      @map("credit_limit") @db.Decimal(14, 2)
+  paymentTermsDays Int?          @default(0) @map("payment_terms_days")
+  isActive         Boolean?      @default(true) @map("is_active")
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  deletedAt        DateTime?     @map("deleted_at") @db.Timestamptz()
 
   tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   inventoryMovements InventoryMovement[]
@@ -411,21 +489,21 @@ model Contact {
 }
 
 model Transfer {
-  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId        String         @map("tenant_id") @db.Uuid
-  transferNumber  String         @map("transfer_number") @db.VarChar(50)
-  fromLocationId  String         @map("from_location_id") @db.Uuid
-  toLocationId    String         @map("to_location_id") @db.Uuid
-  status          TransferStatus @default(pending)
-  notes           String?
-  expectedAt      DateTime?      @map("expected_at") @db.Timestamptz()
-  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz()
-  createdBy       String         @map("created_by") @db.Uuid
-  completedAt     DateTime?      @map("completed_at") @db.Timestamptz()
-  completedBy     String?        @map("completed_by") @db.Uuid
-  cancelledAt     DateTime?      @map("cancelled_at") @db.Timestamptz()
-  cancelledBy     String?        @map("cancelled_by") @db.Uuid
-  cancelReason    String?        @map("cancel_reason")
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String         @map("tenant_id") @db.Uuid
+  transferNumber String         @map("transfer_number") @db.VarChar(50)
+  fromLocationId String         @map("from_location_id") @db.Uuid
+  toLocationId   String         @map("to_location_id") @db.Uuid
+  status         TransferStatus @default(pending)
+  notes          String?
+  expectedAt     DateTime?      @map("expected_at") @db.Timestamptz()
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy      String         @map("created_by") @db.Uuid
+  completedAt    DateTime?      @map("completed_at") @db.Timestamptz()
+  completedBy    String?        @map("completed_by") @db.Uuid
+  cancelledAt    DateTime?      @map("cancelled_at") @db.Timestamptz()
+  cancelledBy    String?        @map("cancelled_by") @db.Uuid
+  cancelReason   String?        @map("cancel_reason")
 
   tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   fromLocation       Location            @relation("TransferFrom", fields: [fromLocationId], references: [id])
@@ -435,9 +513,9 @@ model Transfer {
   canceller          User?               @relation("TransferCancelledBy", fields: [cancelledBy], references: [id])
   inventoryMovements InventoryMovement[]
 
+  @@unique([tenantId, transferNumber])
   @@index([tenantId])
   @@index([tenantId, status])
-  @@unique([tenantId, transferNumber])
   @@map("transfers")
 }
 
@@ -465,12 +543,12 @@ model InventoryMovement {
   isReversal    Boolean?     @default(false) @map("is_reversal")
   reversalOf    String?      @map("reversal_of") @db.Uuid
 
-  tenant    Tenant          @relation(fields: [tenantId], references: [id])
-  location  Location        @relation(fields: [locationId], references: [id])
-  variant   ProductVariant  @relation(fields: [variantId], references: [id])
-  transfer  Transfer?       @relation(fields: [transferId], references: [id])
-  contact   Contact?        @relation(fields: [contactId], references: [id])
-  creator   User            @relation(fields: [createdBy], references: [id])
+  tenant    Tenant              @relation(fields: [tenantId], references: [id])
+  location  Location            @relation(fields: [locationId], references: [id])
+  variant   ProductVariant      @relation(fields: [variantId], references: [id])
+  transfer  Transfer?           @relation(fields: [transferId], references: [id])
+  contact   Contact?            @relation(fields: [contactId], references: [id])
+  creator   User                @relation(fields: [createdBy], references: [id])
   original  InventoryMovement?  @relation("MovementReversal", fields: [reversalOf], references: [id])
   reversals InventoryMovement[] @relation("MovementReversal")
 
@@ -534,24 +612,24 @@ model TenantSequence {
 }
 
 model Sale {
-  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId        String     @map("tenant_id") @db.Uuid
-  locationId      String     @map("location_id") @db.Uuid
-  cashierId       String     @map("cashier_id") @db.Uuid
-  customerId      String?    @map("customer_id") @db.Uuid
-  saleNumber      Int        @map("sale_number")
-  status          SaleStatus @default(draft)
-  subtotal        Decimal    @db.Decimal(15, 4)
-  taxAmount       Decimal    @map("tax_amount") @db.Decimal(15, 4)
-  discountAmount  Decimal?   @default(0) @map("discount_amount") @db.Decimal(15, 4)
-  total           Decimal    @db.Decimal(15, 4)
-  currencyCode    String     @map("currency_code") @db.Char(3)
-  notes           String?
-  completedAt     DateTime?  @map("completed_at") @db.Timestamptz()
-  cancelledAt     DateTime?  @map("cancelled_at") @db.Timestamptz()
-  cancelReason    String?    @map("cancel_reason")
-  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt       DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String     @map("tenant_id") @db.Uuid
+  locationId     String     @map("location_id") @db.Uuid
+  cashierId      String     @map("cashier_id") @db.Uuid
+  customerId     String?    @map("customer_id") @db.Uuid
+  saleNumber     Int        @map("sale_number")
+  status         SaleStatus @default(draft)
+  subtotal       Decimal    @db.Decimal(15, 4)
+  taxAmount      Decimal    @map("tax_amount") @db.Decimal(15, 4)
+  discountAmount Decimal?   @default(0) @map("discount_amount") @db.Decimal(15, 4)
+  total          Decimal    @db.Decimal(15, 4)
+  currencyCode   String     @map("currency_code") @db.Char(3)
+  notes          String?
+  completedAt    DateTime?  @map("completed_at") @db.Timestamptz()
+  cancelledAt    DateTime?  @map("cancelled_at") @db.Timestamptz()
+  cancelReason   String?    @map("cancel_reason")
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt      DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
 
   tenant   Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   location Location   @relation(fields: [locationId], references: [id])
@@ -559,6 +637,7 @@ model Sale {
   customer Contact?   @relation(fields: [customerId], references: [id])
   items    SaleItem[]
   payments Payment[]
+  receipts Receipt[]
 
   @@unique([tenantId, locationId, saleNumber])
   @@index([tenantId, locationId, createdAt(sort: Desc)])
@@ -568,19 +647,19 @@ model Sale {
 }
 
 model SaleItem {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  saleId          String   @map("sale_id") @db.Uuid
-  tenantId        String   @map("tenant_id") @db.Uuid
-  variantId       String   @map("variant_id") @db.Uuid
-  quantity        Decimal  @db.Decimal(12, 4)
-  unitPrice       Decimal  @map("unit_price") @db.Decimal(15, 4)
-  taxRate         Decimal  @map("tax_rate") @db.Decimal(5, 2)
-  taxAmount       Decimal  @map("tax_amount") @db.Decimal(15, 4)
-  discountAmount  Decimal? @default(0) @map("discount_amount") @db.Decimal(15, 4)
-  lineTotal       Decimal  @map("line_total") @db.Decimal(15, 4)
-  productName     String   @map("product_name") @db.VarChar(255)
-  productSku      String?  @map("product_sku") @db.VarChar(50)
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  saleId         String   @map("sale_id") @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  variantId      String   @map("variant_id") @db.Uuid
+  quantity       Decimal  @db.Decimal(12, 4)
+  unitPrice      Decimal  @map("unit_price") @db.Decimal(15, 4)
+  taxRate        Decimal  @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount      Decimal  @map("tax_amount") @db.Decimal(15, 4)
+  discountAmount Decimal? @default(0) @map("discount_amount") @db.Decimal(15, 4)
+  lineTotal      Decimal  @map("line_total") @db.Decimal(15, 4)
+  productName    String   @map("product_name") @db.VarChar(255)
+  productSku     String?  @map("product_sku") @db.VarChar(50)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz()
 
   sale    Sale           @relation(fields: [saleId], references: [id], onDelete: Cascade)
   tenant  Tenant         @relation(fields: [tenantId], references: [id])
@@ -592,19 +671,189 @@ model SaleItem {
 }
 
 model Payment {
-  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  saleId          String        @map("sale_id") @db.Uuid
-  tenantId        String        @map("tenant_id") @db.Uuid
-  method          PaymentMethod
-  amount          Decimal       @db.Decimal(15, 4)
-  reference       String?       @db.VarChar(255)
-  receivedAmount  Decimal?      @map("received_amount") @db.Decimal(15, 4)
-  changeAmount    Decimal?      @map("change_amount") @db.Decimal(15, 4)
-  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  saleId         String?       @map("sale_id") @db.Uuid // nullable: payment puede ser abono o refund standalone
+  tenantId       String        @map("tenant_id") @db.Uuid
+  locationId     String?       @map("location_id") @db.Uuid // ADR-018: ubicación donde se cobró
+  cashShiftId    String?       @map("cash_shift_id") @db.Uuid // ADR-009: turno si method=cash
+  method         PaymentMethod
+  status         PaymentStatus @default(captured) // ADR-018: default captured para Cash (síncrono)
+  amount         Decimal       @db.Decimal(15, 4)
+  currencyCode   String        @default("PEN") @map("currency_code") @db.Char(3)
+  reference      String?       @db.VarChar(255)
+  receivedAmount Decimal?      @map("received_amount") @db.Decimal(15, 4)
+  changeAmount   Decimal?      @map("change_amount") @db.Decimal(15, 4)
+  idempotencyKey String?       @map("idempotency_key") @db.VarChar(64) // ADR-018: anti-doble-clic
 
-  sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  tenant Tenant @relation(fields: [tenantId], references: [id])
+  // Provider externo (Yape/Niubiz/etc.) — null para cash/store_credit
+  provider        String? @db.VarChar(30)
+  providerTxId    String? @map("provider_tx_id") @db.VarChar(255)
+  providerPayload Json?   @map("provider_payload")
 
+  // Refund tracking
+  refundedAmount    Decimal? @map("refunded_amount") @db.Decimal(15, 4)
+  refundOfPaymentId String?  @map("refund_of_payment_id") @db.Uuid // FK al payment original si es refund
+
+  // Store credit (si method=store_credit)
+  storeCreditId String? @map("store_credit_id") @db.Uuid
+
+  // Timestamps de transición
+  initiatedAt   DateTime? @map("initiated_at") @db.Timestamptz()
+  capturedAt    DateTime? @map("captured_at") @db.Timestamptz()
+  failedAt      DateTime? @map("failed_at") @db.Timestamptz()
+  voidedAt      DateTime? @map("voided_at") @db.Timestamptz()
+  refundedAt    DateTime? @map("refunded_at") @db.Timestamptz()
+  failureReason String?   @map("failure_reason")
+  voidReason    String?   @map("void_reason")
+
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  createdById String?  @map("created_by_id") @db.Uuid
+
+  sale            Sale?        @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  tenant          Tenant       @relation(fields: [tenantId], references: [id])
+  refundOfPayment Payment?     @relation("PaymentRefund", fields: [refundOfPaymentId], references: [id])
+  refunds         Payment[]    @relation("PaymentRefund")
+  storeCredit     StoreCredit? @relation(fields: [storeCreditId], references: [id])
+
+  @@unique([tenantId, idempotencyKey])
+  @@unique([provider, providerTxId]) // Evita doble registro del mismo pago externo
   @@index([saleId])
+  @@index([cashShiftId, status])
+  @@index([tenantId, status, createdAt(sort: Desc)])
   @@map("payments")
+}
+
+// ============================================================================
+// STORE CREDITS (ADR-011 + ADR-018)
+// ============================================================================
+
+model StoreCredit {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String            @map("tenant_id") @db.Uuid
+  customerId     String?           @map("customer_id") @db.Uuid // FK a Contact (no FK explícita para evitar circular)
+  locationId     String?           @map("location_id") @db.Uuid // NULL = usable en cualquier sede
+  originalAmount Decimal           @map("original_amount") @db.Decimal(15, 4)
+  balance        Decimal           @db.Decimal(15, 4) // decrementa al usarse
+  currencyCode   String            @default("PEN") @map("currency_code") @db.Char(3)
+  status         StoreCreditStatus @default(active)
+  expiresAt      DateTime?         @map("expires_at") @db.Timestamptz()
+  notes          String?
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz()
+  createdById    String?           @map("created_by_id") @db.Uuid
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  @@index([tenantId, customerId, status])
+  @@index([tenantId, status, expiresAt])
+  @@map("store_credits")
+}
+
+model Receipt {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String        @map("tenant_id") @db.Uuid
+  locationId        String        @map("location_id") @db.Uuid
+  saleId            String?       @map("sale_id") @db.Uuid
+  type              ReceiptType
+  series            String        @db.VarChar(10)
+  number            Int
+  status            ReceiptStatus @default(draft)
+  customerDocType   String?       @map("customer_doc_type") @db.VarChar(20)
+  customerDocNumber String?       @map("customer_doc_number") @db.VarChar(30)
+  customerName      String?       @map("customer_name") @db.VarChar(255)
+  customerAddress   String?       @map("customer_address")
+  subtotal          Decimal       @db.Decimal(15, 4)
+  taxAmount         Decimal       @map("tax_amount") @db.Decimal(15, 4)
+  total             Decimal       @db.Decimal(15, 4)
+  currencyCode      String        @map("currency_code") @db.Char(3)
+  payloadJson       Json?         @map("payload_json")
+  fileUrl           String?       @map("file_url")
+  issuedAt          DateTime?     @map("issued_at") @db.Timestamptz()
+  voidedAt          DateTime?     @map("voided_at") @db.Timestamptz()
+  voidReason        String?       @map("void_reason")
+  externalCode      String?       @map("external_code") @db.VarChar(255)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id])
+  sale     Sale?    @relation(fields: [saleId], references: [id])
+
+  @@unique([tenantId, locationId, type, series, number])
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@index([saleId])
+  @@map("receipts")
+}
+
+// ============================================================================
+// CASH SHIFTS (ADR-009 + ADR-022)
+// ============================================================================
+
+model CashShift {
+  id           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String          @map("tenant_id") @db.Uuid
+  locationId   String          @map("location_id") @db.Uuid
+  userId       String          @map("user_id") @db.Uuid
+  status       CashShiftStatus @default(open)
+  openedAt     DateTime        @default(now()) @map("opened_at") @db.Timestamptz()
+  closedAt     DateTime?       @map("closed_at") @db.Timestamptz()
+  closedById   String?         @map("closed_by_id") @db.Uuid
+  approvedAt   DateTime?       @map("approved_at") @db.Timestamptz()
+  approvedById String?         @map("approved_by_id") @db.Uuid
+  notes        String?
+
+  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  location   Location           @relation(fields: [locationId], references: [id])
+  user       User               @relation("CashShiftUser", fields: [userId], references: [id])
+  closedBy   User?              @relation("CashShiftClosedBy", fields: [closedById], references: [id])
+  approvedBy User?              @relation("CashShiftApprovedBy", fields: [approvedById], references: [id])
+  balances   CashShiftBalance[]
+  movements  CashMovement[]
+
+  // NOTA: "1 turno open por (tenant, location, user)" se garantiza por:
+  //   (a) check en application (CajasService.abrir lanza si ya existe uno open)
+  //   (b) migration SQL con UNIQUE INDEX parcial (Prisma no soporta WHERE en @@unique):
+  //       CREATE UNIQUE INDEX uniq_open_shift_per_user_location
+  //         ON cash_shifts (tenant_id, location_id, user_id)
+  //         WHERE status = 'open';
+  @@index([tenantId, status, openedAt(sort: Desc)])
+  @@index([locationId, status])
+  @@index([userId, status])
+  @@map("cash_shifts")
+}
+
+model CashShiftBalance {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cashShiftId    String   @map("cash_shift_id") @db.Uuid
+  currencyCode   String   @map("currency_code") @db.Char(3)
+  openingAmount  Decimal  @default(0) @map("opening_amount") @db.Decimal(15, 4)
+  expectedAmount Decimal? @map("expected_amount") @db.Decimal(15, 4)
+  actualAmount   Decimal? @map("actual_amount") @db.Decimal(15, 4)
+  difference     Decimal? @db.Decimal(15, 4)
+
+  cashShift CashShift @relation(fields: [cashShiftId], references: [id], onDelete: Cascade)
+
+  @@unique([cashShiftId, currencyCode])
+  @@index([cashShiftId])
+  @@map("cash_shift_balances")
+}
+
+model CashMovement {
+  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cashShiftId    String             @map("cash_shift_id") @db.Uuid
+  type           CashMovementType
+  reason         CashMovementReason
+  amount         Decimal            @db.Decimal(15, 4)
+  currencyCode   String             @map("currency_code") @db.Char(3)
+  referenceType  String?            @map("reference_type") @db.VarChar(20) // 'sale' | 'return' | null
+  referenceId    String?            @map("reference_id") @db.Uuid
+  authorizedById String?            @map("authorized_by_id") @db.Uuid
+  notes          String?
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz()
+
+  cashShift    CashShift @relation(fields: [cashShiftId], references: [id], onDelete: Cascade)
+  authorizedBy User?     @relation("CashMovementAuthorizedBy", fields: [authorizedById], references: [id])
+
+  @@index([cashShiftId, type, currencyCode])
+  @@index([referenceType, referenceId])
+  @@map("cash_movements")
 }
